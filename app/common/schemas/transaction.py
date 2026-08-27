@@ -67,5 +67,4 @@ class TransactionOut(TransactionDateMixin, BaseModel):
 
 class LatestTransactionsResponse(BaseModel):
     count: int
-    message: Optional[str] = None
     transactions: List[TransactionOut]
