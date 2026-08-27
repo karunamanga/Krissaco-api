@@ -7,7 +7,6 @@ from app.common.schemas.transaction import TransactionCreate, TransactionOut
 
 router = APIRouter()
 
-
 @router.post(
     "/transaction",
     response_model=TransactionOut,
@@ -31,5 +30,4 @@ def create_transaction(
     db.add(transaction)
     db.commit()
     db.refresh(transaction)
-
     return transaction
