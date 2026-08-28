@@ -3,7 +3,6 @@ from fastapi import FastAPI
 from app.features.latest_transactions import router as latest_transactions_router
 from app.features.record_transaction import router as record_transaction_router
 from app.features.statement import router as statement_router
-from app.core.database import engine, Base
 
 app = FastAPI(title="Krissaco Transaction API")
 
