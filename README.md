@@ -1,6 +1,6 @@
 # Krissaco Transaction API
 
-A FastAPI + PostgreSQL microservice for recording business transactions and retrieving the latest transactions and date-range statements. Coffee production business context (heads: Coffee Beans, Roasting, Packaging, etc.).
+A FastAPI + PostgreSQL microservice for recording business transactions and retrieving the latest transactions and date-range statements.
 
 ## Tech Stack
 
@@ -8,6 +8,10 @@ A FastAPI + PostgreSQL microservice for recording business transactions and retr
 - **Database:** PostgreSQL
 - **ORM:** SQLAlchemy
 - **Validation:** Pydantic
+
+## Scope
+
+This project provides the **REST API only**. Database and table creation/management is **out of scope** for the application and is owned by a DBA. The API only performs data manipulation (read/write) against a schema that already exists.
 
 ## Project Structure
 
@@ -19,14 +23,14 @@ app/
 │   ├── database.py                   # DB connection, Base, get_db
 │   └── exceptions.py                 # custom exception (KrissacoException)
 ├── common/
-│   ├── models/transaction.py          # the Transaction DB table + enums
+│   ├── models/transaction.py          # the Transaction table definition (ORM mapping only -- does not create it)
 │   └── schemas/transaction.py         # shared Pydantic request/response schemas
 └── features/
     ├── record_transaction/             # POST /transaction
     ├── latest_transactions/            # GET /transaction
-    └── statement/                      # GET /transaction/statement
+    └── statement/                      # GET /statement
 tests/                                # mirrors features/ structure
-krissaco.sql
+krissaco.sql                          # DDL script -- run manually by a DBA, not by the app
 requirements.txt
 .env.example
 ```
@@ -36,12 +40,45 @@ requirements.txt
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/transaction` | Latest N transactions, most recent first (`?limit=`) |
-| `POST` | `/transaction` | Record a new transaction |
-| `GET` | `/transaction/statement` | Transactions + totals in a date range (`?start_date=&end_date=`) |
+| `POST` | `/transaction` | Record a new transaction. Returns the created record, including the generated `TransactionID`, with `201 Created`. |
+| `GET` | `/statement` | Transactions + revenue/expense totals in a date range (`?start_date=&end_date=`) |
 
 **Dates use `DD-MM-YYYY` format** throughout the API (not ISO).
 
 Interactive docs available at `http://127.0.0.1:8000/docs` once running.
+
+### Validation rules
+
+#### `POST /transaction`
+
+| Field | Rule |
+|---|---|
+| `TransactionDate` | Required. Format `DD-MM-YYYY`. Cannot be a future date. |
+| `TransactionType` | Required. Must be exactly `Revenue` or `Expense`. |
+| `TransactionHead` | Required. Must be one of: `Coffee Beans`, `Chicory`, `Roasting`, `Grinding`, `Blending`, `Packaging`, `Transport`, `Promotion`, `Commission`, `Audit`, `Licenses`, `Other Operational Expenses`. |
+| `Amount` | Required. Must be greater than `0`. |
+| `Vendor` | Required. 2–150 characters. |
+| `Description` | Required. 3–255 characters. |
+| `Remarks` | Optional. Up to 255 characters. |
+
+Any violation returns `422 Unprocessable Entity` with details on which field failed. On success, returns `201 Created` with the full saved record, including the generated `TransactionID`.
+
+#### `GET /transaction`
+
+| Param | Rule |
+|---|---|
+| `limit` | Optional query param. Integer, `1`–`100`. Defaults to `10` if omitted. |
+
+Returns `200 OK` with `count` and `transactions`. If fewer records exist than `limit`, returns whatever is available with the actual `count` — not treated as an error. If no transactions exist at all, returns `count: 0` and an empty `transactions` array.
+
+#### `GET /statement`
+
+| Param | Rule |
+|---|---|
+| `start_date` | Required query param. Format `DD-MM-YYYY`. |
+| `end_date` | Required query param. Format `DD-MM-YYYY`. Must be strictly later than `start_date` (a single-day range where `start_date == end_date` is currently rejected). |
+
+Invalid format or an invalid range returns `400 Bad Request` with a message describing the problem. On success, returns `200 OK` with `count`, `total_revenue`, `total_expense`, `net`, and the list of matching `transactions`.
 
 ---
 
@@ -49,14 +86,10 @@ Interactive docs available at `http://127.0.0.1:8000/docs` once running.
 
 ### 1. Clone the repository
 
-Open a terminal in VS Code (`` Ctrl+` ``) and run:
-
 ```bash
 git clone <repository-url>
 cd <repository-folder-name>
 ```
-
-> Replace `<repository-url>` with the Git URL you were given (HTTPS or SSH), and `<repository-folder-name>` with the folder name Git creates (usually the repo name).
 
 ### 2. Create and activate a virtual environment
 
@@ -85,25 +118,13 @@ You should see `(venv)` at the start of your terminal prompt once active.
 pip install -r requirements.txt
 ```
 
-### 4. Set up the database in PostgreSQL
+### 4. Create the database and table
 
-Pick whichever tool you're comfortable with — **pgAdmin** (GUI) or **psql** (command line). You only need to do one.
+The application does **not** create these automatically. Use `krissaco.sql` with either tool below.
 
-#### Option A — pgAdmin (GUI)
+#### Option A — SQL Shell (psql)
 
-1. Open **pgAdmin** and connect to your local PostgreSQL server (enter your postgres password if prompted).
-2. In the left sidebar, right-click **Databases** → **Create** → **Database...**
-3. In the **Database** field, enter:
-   ```
-   Krissaco
-   ```
-4. Leave the rest of the defaults and click **Save**.
-5. Confirm it appears under **Databases** in the sidebar.
-6. (Optional) After the app has run once (see step 7), expand `Krissaco` → **Schemas** → **public** → **Tables** to inspect the `transaction` table and its columns.
-
-#### Option B — psql (command line)
-
-Open **SQL Shell (psql)** and connect (press Enter to accept each default until prompted for your password):
+Open psql and connect (press Enter to accept each default until prompted for your password):
 
 ```
 Server [localhost]: (Enter)
@@ -113,39 +134,56 @@ Username [postgres]: (Enter)
 Password: <your postgres password>
 ```
 
-Create the database:
+Create the database (skip if it already exists):
 
 ```sql
 CREATE DATABASE "Krissaco";
 ```
 
-Confirm it was created:
-
-```sql
-\l
-```
-
-(Optional) Connect to it and inspect the table after the app has run once (see step 7):
+Switch into it:
 
 ```sql
 \c "Krissaco"
-\dt
-\d transaction
 ```
 
-Exit psql:
+Run the DDL script:
+
+```sql
+\i 'path/to/krissaco.sql'
+```
+(Use forward slashes in the path, even on Windows.)
+
+Confirm it worked:
+
+```sql
+\dt
+\d "transaction"
+```
+
+Exit:
 
 ```sql
 \q
 ```
 
+#### Option B — pgAdmin
+
+1. Open pgAdmin and connect to your local server
+2. Right-click **Databases** → **Create** → **Database...** → name it `Krissaco` → **Save** (skip if it already exists)
+3. Right-click the **Krissaco** database → **Query Tool**
+4. In the Query Tool toolbar, click **Open File** and select `krissaco.sql`
+5. Click **Execute/Run** (▶ or F5)
+6. Confirm: expand **Krissaco → Schemas → public → Tables** — `transaction` should be listed
+
 ### 5. Configure environment variables
 
-Copy the example file and edit it:
+Copy the example file and rename it:
 
 ```bash
-copy .env.example .env
+cp .env.example .env
 ```
+
+(On Windows PowerShell: `copy .env.example .env`)
 
 Open `.env` and set your real PostgreSQL password:
 
@@ -161,69 +199,12 @@ DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/Krissaco
 uvicorn app.main:app --reload
 ```
 
-This automatically creates the `transaction` table and enum types in Postgres on first run — you don't need to create them manually. The resulting schema is shown below for reference (e.g. if you want to inspect it in pgAdmin/psql, or recreate it by hand).
-
 You should see:
 ```
 Uvicorn running on http://127.0.0.1:8000
 ```
 
-#### Table schema (created automatically)
-
-**Enum types:**
-
-```sql
-CREATE TYPE "transactionTypeEnum" AS ENUM ('Revenue', 'Expense');
-
-CREATE TYPE "transactionHeadEnum" AS ENUM (
-    'Coffee Beans',
-    'Chicory',
-    'Roasting',
-    'Grinding',
-    'Blending',
-    'Packaging',
-    'Transport',
-    'Promotion',
-    'Commission',
-    'Audit',
-    'Licenses',
-    'Other Operational Expenses'
-);
-```
-
-**`transaction` table:**
-
-```sql
-CREATE TABLE transaction (
-    "TransactionID"   UUID PRIMARY KEY,                          -- generated by the app (uuid4)
-    "TransactionDate" DATE NOT NULL,
-    "TransactionType" "transactionTypeEnum" NOT NULL,
-    "TransactionHead" "transactionHeadEnum" NOT NULL,
-    "Amount"          NUMERIC(12, 2) NOT NULL,
-    "Vendor"          VARCHAR(150) NOT NULL,
-    "Description"     VARCHAR(255) NOT NULL,
-    "Remarks"         VARCHAR(255),                               -- optional
-    "CreatedAt"       TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-    CONSTRAINT ck_amount_positive       CHECK ("Amount" > 0),
-    CONSTRAINT ck_date_not_future       CHECK ("TransactionDate" <= CURRENT_DATE),
-    CONSTRAINT ck_vendor_min_length     CHECK (char_length("Vendor") >= 2),
-    CONSTRAINT ck_description_min_length CHECK (char_length("Description") >= 3),
-    CONSTRAINT ck_description_max_length CHECK (char_length("Description") <= 255)
-);
-```
-
-| Column | Type | Notes |
-|---|---|---|
-| `TransactionID` | UUID | Primary key, generated by the app |
-| `TransactionDate` | DATE | Required, cannot be a future date, API format `DD-MM-YYYY` |
-| `TransactionType` | enum | `Revenue` or `Expense` |
-| `TransactionHead` | enum | One of the 12 heads listed above (Coffee Beans, Chicory, Roasting, Grinding, Blending, Packaging, Transport, Promotion, Commission, Audit, Licenses, Other Operational Expenses) |
-| `Amount` | NUMERIC(12,2) | Required, must be > 0 |
-| `Vendor` | VARCHAR(150) | Required, min length 2 |
-| `Description` | VARCHAR(255) | Required, length 3–255 |
-| `Remarks` | VARCHAR(255) | Optional |
-| `CreatedAt` | TIMESTAMPTZ | Set automatically on insert |
+The app connects to the existing table — it does not create or alter it.
 
 ### 7. Test it
 
@@ -237,280 +218,68 @@ Or via curl:
 curl http://127.0.0.1:8000/transaction
 ```
 
-Or via **Postman**:
-
-1. Open Postman and create a new request.
-2. **GET latest transactions:**
-   - Method: `GET`
-   - URL: `http://127.0.0.1:8000/transaction`
-   - (Optional) Add a query param `limit` with a value, e.g. `5`
-   - Click **Send**
-3. **POST a new transaction:**
-   - Method: `POST`
-   - URL: `http://127.0.0.1:8000/transaction`
-   - Go to the **Body** tab → select **raw** → set the type dropdown to **JSON**
-   - Paste a sample body (see the full set of POST test cases below)
-   - Click **Send**
-4. **GET statement for a date range:**
-   - Method: `GET`
-   - URL: `http://127.0.0.1:8000/transaction/statement`
-   - Go to the **Params** tab and add `start_date` / `end_date` (see the test cases below)
-   - Click **Send**
-
-> Tip: Group these three requests into a Postman **Collection** (e.g. "Krissaco API") so the whole team can import and reuse them — File → Export, or share via a Postman workspace/team.
-
 Expected response with no data yet:
 ```json
-{"count": 0, "message": "No transactions have been recorded yet.", "transactions": []}
+{"count": 0, "transactions": []}
+```
+
+Example `POST /transaction` request:
+```json
+{
+  "TransactionDate": "25-08-2026",
+  "TransactionType": "Expense",
+  "TransactionHead": "Roasting",
+  "Amount": 1200.50,
+  "Vendor": "Acme Traders",
+  "Description": "Roasting batch payment",
+  "Remarks": "Paid via UPI"
+}
+```
+
+Example `201 Created` response (note `TransactionID` is included, per REST convention):
+```json
+{
+  "TransactionID": "59fe9bfd-2095-4072-b94e-114fc1eb85bf",
+  "TransactionDate": "25-08-2026",
+  "TransactionType": "Expense",
+  "TransactionHead": "Roasting",
+  "Amount": "1200.50",
+  "Vendor": "Acme Traders",
+  "Description": "Roasting batch payment",
+  "Remarks": "Paid via UPI",
+  "CreatedAt": "2026-08-27T12:15:31.656387+05:30"
+}
+```
+
+### 8. (Optional) Load sample test data
+
+`post_test_data.py` sends 30 randomized transactions through the running API (via `POST /transaction`), useful for populating test data without bypassing the API layer:
+
+```bash
+python post_test_data.py
 ```
 
 ---
 
-## Postman test cases
+## Inspecting the database
 
-Use these to exercise every validation rule on `POST /transaction` and the date-range behavior of `GET /transaction/statement`. All POST requests: Method `POST`, URL `http://127.0.0.1:8000/transaction`, Body → raw → JSON.
-
-### POST /transaction
-
-**1. Valid Expense — should succeed (201)**
-```json
-{
-  "TransactionDate": "20-08-2026",
-  "TransactionType": "Expense",
-  "TransactionHead": "Transport",
-  "Amount": 850.00,
-  "Vendor": "Sunrise Logistics",
-  "Description": "Freight charges for August batch",
-  "Remarks": "Paid via bank transfer"
-}
-```
-
-**2. Valid Revenue — should succeed (201)**
-```json
-{
-  "TransactionDate": "22-08-2026",
-  "TransactionType": "Revenue",
-  "TransactionHead": "Promotion",
-  "Amount": 3000.00,
-  "Vendor": "Client XYZ",
-  "Description": "Advance payment received",
-  "Remarks": "Bank transfer"
-}
-```
-
-**3. Valid with `Remarks` omitted (optional field) — should succeed (201)**
-```json
-{
-  "TransactionDate": "21-08-2026",
-  "TransactionType": "Expense",
-  "TransactionHead": "Audit",
-  "Amount": 500.00,
-  "Vendor": "Prime Consultants",
-  "Description": "Quarterly audit fee"
-}
-```
-
-**4. Future date — should fail (422, `date_not_in_future`)**
-```json
-{
-  "TransactionDate": "25-12-2026",
-  "TransactionType": "Expense",
-  "TransactionHead": "Licenses",
-  "Amount": 400.00,
-  "Vendor": "Test Vendor",
-  "Description": "Should be rejected — future date"
-}
-```
-
-**5. Wrong date format — ISO instead of `DD-MM-YYYY` — should fail (422)**
-```json
-{
-  "TransactionDate": "2026-08-20",
-  "TransactionType": "Expense",
-  "TransactionHead": "Grinding",
-  "Amount": 300.00,
-  "Vendor": "Test Vendor",
-  "Description": "Should be rejected — wrong date format"
-}
-```
-
-**6. Amount = 0 — should fail (422, `gt=0`)**
-```json
-{
-  "TransactionDate": "20-08-2026",
-  "TransactionType": "Expense",
-  "TransactionHead": "Packaging",
-  "Amount": 0,
-  "Vendor": "Test Vendor",
-  "Description": "Should be rejected — zero amount"
-}
-```
-
-**7. Negative amount — should fail (422)**
-```json
-{
-  "TransactionDate": "20-08-2026",
-  "TransactionType": "Expense",
-  "TransactionHead": "Packaging",
-  "Amount": -150.00,
-  "Vendor": "Test Vendor",
-  "Description": "Should be rejected — negative amount"
-}
-```
-
-**8. Vendor too short (< 2 chars) — should fail (422, `min_length=2`)**
-```json
-{
-  "TransactionDate": "20-08-2026",
-  "TransactionType": "Expense",
-  "TransactionHead": "Chicory",
-  "Amount": 200.00,
-  "Vendor": "A",
-  "Description": "Should be rejected — vendor too short"
-}
-```
-
-**9. Description too short (< 3 chars) — should fail (422, `min_length=3`)**
-```json
-{
-  "TransactionDate": "20-08-2026",
-  "TransactionType": "Expense",
-  "TransactionHead": "Blending",
-  "Amount": 200.00,
-  "Vendor": "Test Vendor",
-  "Description": "Hi"
-}
-```
-
-**10. Description too long (> 255 chars) — should fail (422, `max_length=255`)**
-```json
-{
-  "TransactionDate": "20-08-2026",
-  "TransactionType": "Expense",
-  "TransactionHead": "Commission",
-  "Amount": 200.00,
-  "Vendor": "Test Vendor",
-  "Description": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-}
-```
-
-**11. Missing required field (no `Vendor`) — should fail (422)**
-```json
-{
-  "TransactionDate": "20-08-2026",
-  "TransactionType": "Expense",
-  "TransactionHead": "Coffee Beans",
-  "Amount": 200.00,
-  "Description": "Missing vendor field"
-}
-```
-
-**12. Invalid `TransactionType` (not Revenue/Expense) — should fail (422, enum validation)**
-```json
-{
-  "TransactionDate": "20-08-2026",
-  "TransactionType": "Credit",
-  "TransactionHead": "Coffee Beans",
-  "Amount": 200.00,
-  "Vendor": "Test Vendor",
-  "Description": "Invalid type value"
-}
-```
-
-**13. Invalid `TransactionHead` (not one of the 12) — should fail (422, enum validation)**
-```json
-{
-  "TransactionDate": "20-08-2026",
-  "TransactionType": "Expense",
-  "TransactionHead": "Sales",
-  "Amount": 200.00,
-  "Vendor": "Test Vendor",
-  "Description": "Invalid head value"
-}
-```
-
-### GET /transaction/statement
-
-All requests: Method `GET`, URL `http://127.0.0.1:8000/transaction/statement`, params added via the **Params** tab.
-
-**1. Valid range with data — should succeed (200)**
-| Param | Value |
-|---|---|
-| `start_date` | `01-08-2026` |
-| `end_date` | `31-08-2026` |
-
-**2. Valid range with no matching transactions — should succeed (200, empty result)**
-| Param | Value |
-|---|---|
-| `start_date` | `01-01-2020` |
-| `end_date` | `31-01-2020` |
-
-**3. Single-day range (`start_date` = `end_date`) — should succeed (200)**
-| Param | Value |
-|---|---|
-| `start_date` | `20-08-2026` |
-| `end_date` | `20-08-2026` |
-
-**4. `start_date` after `end_date` — should fail (422 or empty result, depending on validation)**
-| Param | Value |
-|---|---|
-| `start_date` | `31-08-2026` |
-| `end_date` | `01-08-2026` |
-
-**5. Missing `end_date` — should fail (422, required query param)**
-| Param | Value |
-|---|---|
-| `start_date` | `01-08-2026` |
-
-**6. Missing `start_date` — should fail (422, required query param)**
-| Param | Value |
-|---|---|
-| `end_date` | `31-08-2026` |
-
-**7. Missing both params — should fail (422)**
-*(no query params — call the endpoint with an empty query string)*
-
-**8. Wrong date format — ISO instead of `DD-MM-YYYY` — should fail (422)**
-| Param | Value |
-|---|---|
-| `start_date` | `2026-08-01` |
-| `end_date` | `2026-08-31` |
-
-**9. Future `end_date` — should succeed or fail depending on business rules (verify expected behavior)**
-| Param | Value |
-|---|---|
-| `start_date` | `01-08-2026` |
-| `end_date` | `31-12-2026` |
-
-> Note: Cases 4 and 9 depend on validation rules inside `app/features/statement/` (e.g. whether `start_date > end_date` or future dates are explicitly rejected). Check `schema.py`/`service.py` for that feature to confirm the exact expected status code, and adjust the table above once confirmed.
-
----
-
-## Resetting the database (if schema changes)
-
-If you change the model and need to rebuild the table from scratch, run this before restarting the app.
-
-**Using pgAdmin:** open the **Query Tool** on the `Krissaco` database and run:
-
-```sql
-DROP TABLE IF EXISTS transaction;
-DROP TYPE IF EXISTS "transactionTypeEnum";
-DROP TYPE IF EXISTS "transactionHeadEnum";
-```
-
-**Using psql:**
+#### Via psql
 
 ```sql
 \c "Krissaco"
-DROP TABLE IF EXISTS transaction;
-DROP TYPE IF EXISTS "transactionTypeEnum";
-DROP TYPE IF EXISTS "transactionHeadEnum";
+\dt
+\d "transaction"
+SELECT * FROM "transaction" ORDER BY "CreatedAt" DESC;
 ```
 
-Then restart:
-```bash
-uvicorn app.main:app --reload
-```
+#### Via pgAdmin
+
+1. Expand **Servers → PostgreSQL → Databases → Krissaco → Schemas → public → Tables**
+2. Right-click **transaction** → **View/Edit Data** → **All Rows**
+
+## Schema changes
+
+Since the API does not manage the schema, any change to `app/common/models/transaction.py` (new column, changed constraint, new enum value) must be paired with a corresponding update to `krissaco.sql`, applied manually by a DBA (via `ALTER TABLE`, `ALTER TYPE`, etc.). The two are not automatically kept in sync — update both together.
 
 ---
 
@@ -519,12 +288,13 @@ uvicorn app.main:app --reload
 Each feature lives in its own folder under `app/features/<feature_name>/` (`router.py`, `service.py`, `repository.py`, `schema.py`). When adding or changing a feature:
 
 1. Work inside your own `features/<feature_name>/` folder only
-2. If a change is needed in `app/common/` (shared model or schema), flag it with the team first — it affects every feature
+2. If a change is needed in `app/common/` (shared model or schema) or the database schema, flag it with the team first — it affects every feature
 3. Register your router in `app/main.py`
-4. Open a Pull Request rather than pushing directly to `main`
+4. Do not change existing API paths or methods without team agreement — other services depend on this contract
+5. Open a Pull Request rather than pushing directly to `main`
 
 ## Status
 
 - ✅ Record transaction (`POST /transaction`)
 - ✅ Latest transactions (`GET /transaction`)
-- ✅ Statement by date range (`GET /transaction/statement`)
+- ✅ Statement by date range (`GET /statement`)
