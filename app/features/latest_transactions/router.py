@@ -29,7 +29,6 @@ def get_latest_transactions(
     if not txns:
         return LatestTransactionsResponse(
             count=0,
-            message="No transactions have been recorded yet.",
             transactions=[],
         )
 
