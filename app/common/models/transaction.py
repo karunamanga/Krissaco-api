@@ -45,10 +45,20 @@ class Transaction(Base):
     # user input
     TransactionDate = Column(Date, nullable=False)
     TransactionType = Column(
-        SAEnum(TransactionType, name="transactionTypeEnum"), nullable=False
+        SAEnum(
+            TransactionType,
+            name="transactionTypeEnum",
+            values_callable=lambda enum_cls: [e.value for e in enum_cls],
+        ),
+        nullable=False,
     )
     TransactionHead = Column(
-        SAEnum(TransactionHead, name="transactionHeadEnum"), nullable=False
+        SAEnum(
+            TransactionHead,
+            name="transactionHeadEnum",
+            values_callable=lambda enum_cls: [e.value for e in enum_cls],
+        ),
+        nullable=False,
     )
     Amount = Column(Numeric(12, 2), nullable=False)
     Vendor = Column(String(150), nullable=False)
