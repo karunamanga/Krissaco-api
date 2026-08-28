@@ -22,7 +22,7 @@ def _parse(value: str, field_name: str):
 
 
 @router.get(
-    "/transaction/statement",
+    "/statement",
     response_model=StatementResponse,
 )
 def get_statement(
