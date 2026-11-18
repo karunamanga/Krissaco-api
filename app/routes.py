@@ -39,3 +39,6 @@ def get_latest_transactions(
         count=len(txns),
         transactions=txns,
     )
+
+
+    return schemas.LatestTransactionsResponse
