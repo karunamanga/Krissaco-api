@@ -40,7 +40,7 @@ class Transaction(Base):
     __tablename__ = "transaction"
 
     # system generated
-    TranscationID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    TransactionID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     # user input
     TransactionDate = Column(Date, nullable=False)

@@ -11,7 +11,7 @@ from .models import TransactionType, TransactionHead
 class TransactionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    TranscationID: uuid.UUID
+    TransactionID: uuid.UUID
     TransactionDate: date
     TransactionType: TransactionType
     TransactionHead: TransactionHead
